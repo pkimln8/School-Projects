@@ -50,6 +50,7 @@ parallel_sum(struct thread_pool * pool, void * _data)
     struct future * f = thread_pool_submit(pool, parallel_sum, &right_half);
     uintptr_t lresult = (uintptr_t) parallel_sum(pool, &left_half);
     uintptr_t rresult = (uintptr_t) future_get(f);
+    future_free(f);
     return (void *)(lresult + rresult);
 }
 
