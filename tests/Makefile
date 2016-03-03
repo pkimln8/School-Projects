@@ -9,7 +9,7 @@
 # we will use *this* Makefile to run check.py when grading.
 #
 # for benchmarking
-CFLAGS=-Wall -O3 -Werror -Wmissing-prototypes -fopenmp
+CFLAGS=-Wall -O3 -Werror -Wmissing-prototypes -fopenmp -std=gnu11
 # for debugging
 #CFLAGS=-Wall -O0 -g -Werror -Wmissing-prototypes
 
@@ -20,8 +20,12 @@ LDLIBS=-lpthread -lrt
 
 OBJ=threadpool.o list.o threadpool_lib.o
 
-ALL=quicksort psum_test fib_test mergesort threadpool_test nqueens threadpool_test2 threadpool_test3
+ALL=quicksort psum_test fib_test mergesort nqueens \
+	threadpool_test threadpool_test2 threadpool_test3 threadpool_test4
+
 all: $(ALL)
+
+threadpool_test4: threadpool_test4.o $(OBJ)
 
 threadpool_test3: threadpool_test3.o $(OBJ)
 

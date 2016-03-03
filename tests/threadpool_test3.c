@@ -111,7 +111,7 @@ int
 main(int ac, char *av[]) 
 {
     int c, nthreads = DEFAULT_THREADS;
-    while ((c = getopt(ac, av, "n:")) != EOF) {
+    while ((c = getopt(ac, av, "hn:")) != EOF) {
         switch (c) {
         case 'n':
             nthreads = atoi(optarg);

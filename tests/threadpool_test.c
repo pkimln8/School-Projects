@@ -1,9 +1,9 @@
 /*
  * Fork/Join Framework 
  *
- * Test 2.
+ * Test 1.
  *
- * Tests running multiple tasks.
+ * Tests simple task execution.
  *
  * Written by G. Back for CS3214 Fall 2014.
  */
@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/time.h>
@@ -30,12 +29,12 @@ struct arg2 {
 };
 
 /* 
- * A FJ task that multiplies 2 numbers. 
+ * A FJ task that adds 2 numbers. 
  */
 static void *
-multiplier_task(struct thread_pool *pool, struct arg2 * data)
+adder_task(struct thread_pool *pool, struct arg2 * data)
 {
-    return (void *)(data->a * data->b);
+    return (void *)(data->a + data->b);
 }
 
 static int
@@ -44,32 +43,22 @@ run_test(int nthreads)
     struct benchmark_data * bdata = start_benchmark();
     struct thread_pool * threadpool = thread_pool_new(nthreads);
    
-#define NTASKS 200
-    struct future *f[NTASKS];
-    struct arg2 *args[NTASKS];
-    int i;
-    for (i = 0; i < NTASKS; i++) {
-        args[i] = malloc(sizeof (struct arg2));
-        args[i]->a = i;
-        args[i]->b = i+1;
-        f[i] = thread_pool_submit(threadpool, (fork_join_task_t) multiplier_task, args[i]);
-    }
+    struct arg2 args = {
+        .a = 20,
+        .b = 22,
+    };
 
-    bool success = true;
-    for (i = 0; i < NTASKS; i++) {
-        uintptr_t sprod = (uintptr_t) future_get(f[i]);
-        future_free(f[i]);
-        free(args[i]);
-        if (sprod != i * (i + 1))
-            success = false;
-    }
+    struct future * sum = thread_pool_submit(threadpool, (fork_join_task_t) adder_task, &args);
+
+    uintptr_t ssum = (uintptr_t) future_get(sum);
+    future_free(sum);
     thread_pool_shutdown_and_destroy(threadpool);
 
     stop_benchmark(bdata);
 
     // consistency check
-    if (!success) {
-        fprintf(stderr, "Wrong result\n");
+    if (ssum != 42) {
+        fprintf(stderr, "Wrong result, expected 42, got %ld\n", ssum);
         abort();
     }
 
@@ -94,7 +83,7 @@ int
 main(int ac, char *av[]) 
 {
     int c, nthreads = DEFAULT_THREADS;
-    while ((c = getopt(ac, av, "n:")) != EOF) {
+    while ((c = getopt(ac, av, "hn:")) != EOF) {
         switch (c) {
         case 'n':
             nthreads = atoi(optarg);

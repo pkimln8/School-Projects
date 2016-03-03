@@ -1,8 +1,14 @@
+#define _GNU_SOURCE 1
+#include <signal.h>
+#include <ucontext.h>
+
+#include <pthread.h>
 #include <time.h>
 #include <sys/time.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <stdint.h>
 #include <sys/resource.h>
 
 #include "threadpool_lib.h"
@@ -145,4 +151,64 @@ void report_benchmark_results_to_human(FILE *f, struct benchmark_data *bdata)
     // fprintf(stderr, "Writing %s\n", buf);
     print_rusage_to_human(f, &bdata->rdiff);
     fprintf(f, "real time: %ld.%06lds\n", bdata->diff.tv_sec, bdata->diff.tv_usec);
+}
+
+/* FIXME: this code is Linux/64bit only. */
+static void
+catch_segfault(int signo, siginfo_t *info, void * _ctxt)
+{
+    ucontext_t * ctxt = _ctxt;
+    uintptr_t faultaddr = (uintptr_t) info->si_addr;
+    uintptr_t rsp = (uintptr_t) ctxt->uc_mcontext.gregs[REG_RSP];
+    uintptr_t rip = (uintptr_t) ctxt->uc_mcontext.gregs[REG_RIP];
+
+    fprintf(stderr, "\n\n----------------------------------------------------------------------\n\n");
+    fprintf(stderr, "Segmentation Fault, faultaddr=0x%lx, rip=0x%lx, rsp=0x%lx\n",
+        faultaddr, rip, rsp);
+    if (abs(faultaddr - rsp) < 2048) {
+        int page_size = 4096; 
+        pthread_attr_t attr;
+        void * stackaddr;
+        size_t stacksize;
+        pthread_getattr_np(pthread_self(), &attr);      // non portable
+        pthread_attr_getstack( &attr, &stackaddr, &stacksize );
+        stackaddr += page_size;                         // subtract out guard page
+        stacksize -= page_size;
+        fprintf(stderr, "Likely stack overflow.\nThe current thread's stack bottom is at %p.\n", stackaddr); 
+        fprintf(stderr, "Try using a larger stack size; read pthread_attr_setstacksize(3)\n");
+        fprintf(stderr, "Current thread stack size is %ld\n", stacksize);
+    }
+
+    fprintf(stderr, "Exiting now; the calling shell will not print 'Segmentation Fault'\n");
+    exit(EXIT_FAILURE);
+}
+
+/*
+ * Fork/Join frameworks with child stealing may suffer from high stack
+ * consumption.
+ * Install a handler to detect stack overflow.
+ */
+void install_stack_overflow_handler(void) 
+{
+    struct sigaction act;
+#define ALT_STACK_SIZE 16*1024
+
+    stack_t ss = {
+        .ss_flags = 0,
+        .ss_sp = malloc(ALT_STACK_SIZE),
+        .ss_size = ALT_STACK_SIZE
+    };
+    if (sigaltstack(&ss, NULL)) {
+        perror ("sigaltstack");
+        exit (EXIT_FAILURE); 
+    }
+
+    act.sa_sigaction = catch_segfault;
+    act.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset (&act.sa_mask);
+    int status = sigaction (SIGSEGV, &act, NULL);
+    if (status) {
+        perror ("sigaction");
+        exit (EXIT_FAILURE); 
+    }
 }
