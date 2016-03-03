@@ -26,7 +26,7 @@ if script_dir not in sys.path:
 
 from fjtests import load_test_module
 
-src_dir = script_dir + "/../tests"
+src_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__))) + "/tests"
 results_file = "full-results.json"
 filelist = src_dir + "/FILELIST"
 timestamp = str(datetime.now()).replace(" ", "_")
