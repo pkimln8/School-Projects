@@ -11,7 +11,7 @@
 # for benchmarking
 CFLAGS=-Wall -O3 -Werror -Wmissing-prototypes -fopenmp -std=gnu11
 # for debugging
-#CFLAGS=-Wall -O0 -g -Werror -Wmissing-prototypes
+#CFLAGS=-Wall -O0 -g -Werror -Wmissing-prototypes -std=gnu11
 
 #CXXFLAGS=-Wall -O3 -Werror -fopenmp
 CXXFLAGS=-Wall -g -Werror -fopenmp
@@ -21,9 +21,11 @@ LDLIBS=-lpthread -lrt
 OBJ=threadpool.o list.o threadpool_lib.o
 
 ALL=quicksort psum_test fib_test mergesort nqueens \
-	threadpool_test threadpool_test2 threadpool_test3 threadpool_test4
+	threadpool_test threadpool_test2 threadpool_test3 threadpool_test4 threadpool_test5
 
 all: $(ALL)
+
+threadpool_test5: threadpool_test5.o $(OBJ)
 
 threadpool_test4: threadpool_test4.o $(OBJ)
 
