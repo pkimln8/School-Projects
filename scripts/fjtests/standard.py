@@ -48,6 +48,15 @@ tests = [
         ]
     ),
     threadpool_test(
+        name="basic5",
+        command="./threadpool_test5",
+        description="Basic functionality testing (5)",
+        is_required = True,
+        runs=[
+            test_run(name="basic test 5", args=[], thread_count=[2,4])
+        ]
+    ),
+    threadpool_test(
         name="mergesort",
         command="./mergesort",
         description="parallel mergesort",
