@@ -43,7 +43,8 @@ count_number_of_threads(void)
     while (!feof(p)) {
         int threadsleft;
         char buf[128];
-        fgets(buf, sizeof buf, p);
+        if (fgets(buf, sizeof buf, p) == NULL)
+            continue;
         if (sscanf(buf, "Threads: %d\n", &threadsleft) != 1)
             continue;
 
