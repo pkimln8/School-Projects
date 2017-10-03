@@ -1,14 +1,16 @@
 /*
- * esh - the 'pluggable' shell.
- *
+ * esh - the 'pluggable' shell *
  * Developed by Godmar Back for CS 3214 Fall 2009
  * Virginia Tech.
  */
 #include <stdio.h>
 #include <readline/readline.h>
 #include <unistd.h>
-
+#include <sys/wait.h>
 #include "esh.h"
+
+static void esh_command_line_execute(struct esh_command_line *cmdline);
+static void esh_pipeline_execute(struct esh_pipeline *pipe);
 
 static void
 usage(char *progname)
@@ -97,9 +99,10 @@ main(int ac, char *av[])
         if (cmdline == NULL)  /* User typed EOF */
             break;
 
-        struct esh_command_line * cline = shell.parse_command_line(cmdline);
+        struct esh_command_line *cline = shell.parse_command_line(cmdline);
         free (cmdline);
-        if (cline == NULL)                  /* Error in command line */
+        
+	if (cline == NULL)                  /* Error in command line */
             continue;
 
         if (list_empty(&cline->pipes)) {    /* User hit enter */
@@ -107,8 +110,42 @@ main(int ac, char *av[])
             continue;
         }
 
-        esh_command_line_print(cline);
+	esh_command_line_print(cline);
+        esh_command_line_execute(cline);
         esh_command_line_free(cline);
     }
     return 0;
 }
+static void esh_command_line_execute(struct esh_command_line *cmdline) {
+
+        struct list_elem *e = list_begin(&cmdline->pipes);
+
+        for(; e != list_end (&cmdline->pipes); e= list_next (e)) {
+
+                struct esh_pipeline *pipe = list_entry(e, struct esh_pipeline, elem);
+
+                esh_pipeline_execute(pipe);
+        }
+
+}
+
+static void esh_pipeline_execute(struct esh_pipeline *pipe) {
+
+        struct list_elem * e = list_begin (&pipe->commands);
+
+        int pid = fork();
+        if (pid < 0)
+                perror("fork"), exit(-1);
+
+        if(pid == 0) {
+
+                char **cmdln = list_entry(e, struct esh_command, elem)->argv;
+		
+		execvp(cmdln[0], cmdln);
+        }
+        else {
+
+                wait(NULL);
+        }
+}
+
