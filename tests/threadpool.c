@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/time.h>
+#include <list.h>
 
 #include "threadpool.h"
 #include "threadpool_lib.h"
@@ -19,25 +20,33 @@
  * Opaque forward declarations. The actual definitions of these
  * types will be local to your threadpool.c implementation.
  */
+
 struct thread_pool {
 
+	struct * work_thread threads;
+	struct list queues;
 	int num_thread;
-	bool check;
-	pthread_mutex_t poolMutex;
+	bool shutdown;
+	pthread_mutex_t lock;
+	pthread_cond_t wake;
 }
 
+struct work_thread {
+
+	pthread_t id;
+	struct list queues;
+}
 
 struct future {
 
-	// semaphore
-	sem_t sem_future;
-	// pool, task, data
-	struct thread_pool *pool;
 	void * task;
 	void * data;
-	pthread_mutex_t future_mutex;
+	sem_t sem_future;
+	struct thread_pool *pool;
+	pthread_cond_t workdone;
 }
 
+static void * working_thread(void *);
 
 /* Create a new thread pool with no more than n threads. */
 struct thread_pool * thread_pool_new(int nthreads) {
@@ -46,10 +55,36 @@ struct thread_pool * thread_pool_new(int nthreads) {
 		
 	if (pool == NULL) {
 
+		printf("Error: mallocing thread pool\n");
 		exit(1);
-	}	
+	}
 	
+	pthread_mutex_init(&pool->lock, NULL);
+	pthread_cond_init(&pool->wake, NULL);
 	pool->num_thread = nthreads;
+	pool->threads = calloc(nthreads, sizeof(struct work_thread));
+	list_init(&pool->queues);
+	pool->shutdown = false;
+
+	pthread_mutex_lock(&pool->lock);
+	
+	for (int i = 0; i < nthreads; i++) {
+
+		struct work_thread * t = &pool->threads[i];
+
+		list_init(&t->queues);
+
+		pthread_create(&t->id, NULL, working_thread, t);
+	}
+
+	pthread_mutex_unlock(&pool->lock);
+
+	return pool;
+}
+
+static void * working_thread(void * vv) {
+
+	
 }
 
 /*
@@ -59,20 +94,32 @@ struct thread_pool * thread_pool_new(int nthreads) {
  *
  * Deallocate the thread pool object before returning.
  */
-void thread_pool_shutdown_and_destroy(		struct thread_pool *) {
+void thread_pool_shutdown_and_destroy(struct thread_pool * pool) {
 
-}
-/* A function pointer representing a ’fork/join’ task.
- * Tasks are represented as a function pointer to a
- * function.
- * ’pool’ - the thread pool instance in which this task
-            executes
- * ’data’ - a pointer to the data provided in thread_pool_submit
- *
- * Returns the result of its computation.
- */
-typedef void * (* fork_join_task_t) (struct thread_pool *pool, void * data) {
+	pthread_mutex_lock(&pool->lock);
 
+	pool->shutdown = true;
+
+	pthread_cond_broadcast(&pool->wake);
+	pthread_mutex_unlock(&pool->lock);
+
+	//threads join
+	for (int i = 0; i < pool->num_thread; i++) {
+
+		struct work_thread * t = &pool->threads[i];
+		
+		if (pthread_join(t->id, NULL) != 0) {
+
+			printf("Error: thread joining\n");
+			exit(1);
+		}
+	}
+
+	//destroy & free
+	pthread_mutex_destroy(&pool->lock);
+	pthread_cond_destroy(&pool->wake);
+	free(pool->threads);
+	free(pool);
 }
 
 /*
@@ -106,6 +153,7 @@ void * future_get(struct future *) {
 
 /* Deallocate this future.  Must be called after future_get() */
 void future_free(struct future * future_thread) {
+
 	if (future_thread == NULL) {
 		printf("Error occured.");
 	} else {
@@ -117,8 +165,6 @@ void future_free(struct future * future_thread) {
 		pthread_mutex_destroy(future_thread->future_mutex);
 		free(future_thread);
 	}
-	
-
 }
 
 
