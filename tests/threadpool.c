@@ -50,7 +50,7 @@ struct future {
 	sem_t sem_future;
 	int status;
 	struct thread_pool *pool;
-	pthread_cond_t workdone;
+	pthread_mutex_t workdone;
 }
 
 static void * working_thread(void *);
@@ -204,13 +204,22 @@ void thread_pool_shutdown_and_destroy(struct thread_pool * pool) {
  */
 struct future * thread_pool_submit(struct thread_pool *pool, fork_join_task_t task, void * data) {
 	// allocate a new future in this function
-	struct future future = malloc(sizeof(struct future));
+	struct future *return_future = malloc(sizeof(struct future));
 
 	// initializing
-	sem_init(&return_future->sem_future,0,0);
+	sem_init(&return_future->sem_future, 0, 0);
 	future->pool = pool;
 	future->task = task;
 	future->data = data;
+	pthread_mutex_init(&return_future->workdone, NULL);
+	
+	pthread_mutex_lock(&pool->lock);
+	list_push_back(&pool->queues, &return_future->elem);
+	return_future->status = 0;
+	pthread_mutex_unlock(&pool->lock);
+
+	
+	return return_future;
 }
 /* Make sure that the thread pool has completed the execution
  * of the fork join task this future represents.
@@ -222,18 +231,30 @@ void * future_get(struct future *) {
 }
 
 /* Deallocate this future.  Must be called after future_get() */
-void future_free(struct future * future_thread) {
+void future_free(struct future * worker) {
 
-	if (future_thread == NULL) {
+	if (worker == NULL) {
 		printf("Error occured.");
-	} else {
+		exit(1);
+	} 
+	else {
 		// Think of the two cases; when "future_thread is not finished and when it finished"
 		// Destroy it semaphore and mutex;
 		// -> order whould be 1. semaphore and mutex
 		// This means I need to initialize semaphore and mutex in future struct
-		sem_destroy(future_thread->sem_future);
-		pthread_mutex_destroy(future_thread->future_mutex);
-		free(future_thread);
+		if (worker->status == 2) {
+
+			sem_destroy(&worker->sem_future);
+			pthread_mutex_destroy(&worker->workdone);
+			free(worker);
+		}
+		else {
+
+			sem_wait(&worker->sem_future);
+			sem_destroy(&worker->sem_future);
+			pthread_mutex_destroy(&worker->workdone);
+			free(worker);
+		}
 	}
 }
 
