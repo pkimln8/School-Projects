@@ -28,12 +28,18 @@ struct thread_pool {
 	int num_thread;
 	bool shutdown;
 	pthread_mutex_t lock;
+
+	bool createdone;
+	pthread_cond_t create_cond;
+	pthread_mutex_t create_mutex;
+
 	pthread_cond_t wake;
 }
 
 struct work_thread {
 
 	pthread_t id;
+	struct thread_pool * pool;
 	struct list queues;
 }
 
@@ -42,6 +48,7 @@ struct future {
 	void * task;
 	void * data;
 	sem_t sem_future;
+	int status;
 	struct thread_pool *pool;
 	pthread_cond_t workdone;
 }
@@ -61,30 +68,93 @@ struct thread_pool * thread_pool_new(int nthreads) {
 	
 	pthread_mutex_init(&pool->lock, NULL);
 	pthread_cond_init(&pool->wake, NULL);
+	list_init(&pool->queues);	
 	pool->num_thread = nthreads;
 	pool->threads = calloc(nthreads, sizeof(struct work_thread));
-	list_init(&pool->queues);
 	pool->shutdown = false;
-
-	pthread_mutex_lock(&pool->lock);
+	pool->createdone = false;
 	
 	for (int i = 0; i < nthreads; i++) {
 
-		struct work_thread * t = &pool->threads[i];
+		struct work_thread * current_thread = &pool->threads[i];
 
-		list_init(&t->queues);
+		list_init(&current_thread->queues);
+		current_thread->pool = pool;
 
-		pthread_create(&t->id, NULL, working_thread, t);
+		pthread_create(&t->id, NULL, working_thread, current_thread);
 	}
 
-	pthread_mutex_unlock(&pool->lock);
-
+	pool->createdone =true;
+	pthread_cond_broadcast(&pool->create_cond);
 	return pool;
 }
 
 static void * working_thread(void * vv) {
 
-	
+	struct work_thread * current_thread = (struct work_thread *) vv;
+	struct thread_pool * pool = current_thread->pool;
+
+	pthread_mutex_lock(&pool->create_mutex);
+	if (pool->createdone == false);
+		pthead_cond_wait(&pool->create_cond);
+
+	pthread_mutex_unlock(&pool->create_mutex);
+
+	for(;;) {
+
+		struct future * worker;
+
+		pthread_mutex_lock(&pool->lock);
+
+		if(!list_empty(&current_thread->queues)) {
+
+			struct list_elem * e = list_pop_back(&current_thread->queues);
+			worker = list_entry(e, struct future, elem);
+		}
+		else {
+
+			if(!list_empty(&pool->queues)) {
+
+				struct list_elem *e = list_pop_front(&pool->queues);
+				worker = list_entry(e, struct future, elem);
+			}
+			else {
+
+				int i;
+				struct work_thread *stealing_thread;
+				for(i = 0; i < pool->num_thread; i++) {
+
+					stealing_thread = pool->threads[i];
+
+					if (!list_empty(stealing_thread->queues))
+						break;
+				}
+
+				if (i < pool->num_thread) {
+
+					struct list_elem *e = list_pop_front(&stealing_thread->queues);
+					worker = list_entry(e, struct future, elem);
+				}
+				else {
+
+					pthread_mutex_unlock(&pool->lock);
+
+					if (pool->shutdown)
+						pthread_exit(0);
+				}
+			}
+		}
+
+		pthread_mutex_unlock(&pool->lock);
+		
+		worker->status = 1;
+		worker->results = fork_join_task_t(pool, worker->data);
+		worker->status = 2;
+
+		
+
+	}
+	return NULL;
 }
 
 /*
