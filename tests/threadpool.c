@@ -47,10 +47,10 @@ struct future {
 
 	void * task;
 	void * data;
-	sem_t sem_future;
+	void * results;
+	sem_t workdone;
 	int status;
 	struct thread_pool *pool;
-	pthread_mutex_t workdone;
 }
 
 static void * working_thread(void *);
@@ -141,6 +141,8 @@ static void * working_thread(void * vv) {
 
 					if (pool->shutdown)
 						pthread_exit(0);
+
+					
 				}
 			}
 		}
@@ -148,10 +150,10 @@ static void * working_thread(void * vv) {
 		pthread_mutex_unlock(&pool->lock);
 		
 		worker->status = 1;
-		worker->results = fork_join_task_t(pool, worker->data);
+		worker->results = worker->task(pool, worker->data);
 		worker->status = 2;
 
-		
+		sem_post(&worker->workdone);
 
 	}
 	return NULL;
@@ -207,11 +209,10 @@ struct future * thread_pool_submit(struct thread_pool *pool, fork_join_task_t ta
 	struct future *return_future = malloc(sizeof(struct future));
 
 	// initializing
-	sem_init(&return_future->sem_future, 0, 0);
-	future->pool = pool;
-	future->task = task;
-	future->data = data;
-	pthread_mutex_init(&return_future->workdone, NULL);
+	sem_init(&return_future->workdone, 0, 0);
+	return_future->pool = pool;
+	return_future->task = task;
+	return_future->data = data;
 	
 	pthread_mutex_lock(&pool->lock);
 	list_push_back(&pool->queues, &return_future->elem);
@@ -226,8 +227,33 @@ struct future * thread_pool_submit(struct thread_pool *pool, fork_join_task_t ta
  *
  * Returns the value returned by this task.
  */
-void * future_get(struct future *) {
+void * future_get(struct future * worker) {
 
+	pthread_mutex_lock(&worker->pool->lock);
+
+	if (worker->status == 0) {
+
+		list_remove(&worker->elem);
+		worker->status = 1;
+
+		pthread_mutex_unlock(&worker->pool->lock);
+
+		worker->results = (worker->task)(worker->pool, worker->data);
+
+		pthread_mutex_lock(&worker->pool->lock);
+
+		worker->status = 2;
+	}
+	else {
+
+		if (worker->status != 2)
+			sem_wait(&worker->workdone);
+	}
+
+	void *result = worker->results;
+	pthread_mutex_unlock(&worker->pool->lock);
+
+	return result;
 }
 
 /* Deallocate this future.  Must be called after future_get() */
@@ -245,18 +271,14 @@ void future_free(struct future * worker) {
 		if (worker->status == 2) {
 
 			sem_destroy(&worker->sem_future);
-			pthread_mutex_destroy(&worker->workdone);
 			free(worker);
 		}
 		else {
 
-			sem_wait(&worker->sem_future);
-			sem_destroy(&worker->sem_future);
-			pthread_mutex_destroy(&worker->workdone);
+			sem_wait(&worker->workdone);
+			sem_destroy(&worker->workdone);
 			free(worker);
 		}
 	}
 }
-
-
 
