@@ -136,14 +136,15 @@ struct future * thread_pool_submit(struct thread_pool *pool, fork_join_task_t ta
 	return_future->data = data;
 	return_future->status = 0;
 	
-	if (is_worker)
+	if (is_worker) {
+printf("123");
 		list_push_front(&wthread->queues, &return_future->elem);
-	else
+}
+	else 
 		list_push_back(&pool->queues, &return_future->elem);
 
-	pthread_cond_signal(&pool->added_cond);
-//printf("11\n");
 	pool->addeddone = true;
+	pthread_cond_signal(&pool->added_cond);
 
 	pthread_mutex_unlock(&pool->lock);
 
@@ -169,24 +170,31 @@ static void * working_thread(void * vv) {
 
 		struct future * worker;
 
-		if(pool->shutdown)
-			pthread_exit(0);
-
 		pthread_mutex_lock(&pool->lock);
 
-		while(stop(pool)) {
-//printf("got here\n");
+		if (pool->addeddone == false)
 			pthread_cond_wait(&pool->added_cond, &pool->lock);
+
+		while(stop(pool)) {
+printf("sleep\n");
+			pthread_cond_wait(&pool->added_cond, &pool->lock);
+printf("sleep2\n");
 		}
+
+		if(pool->shutdown) {
 printf("22\n");
+			pthread_mutex_unlock(&pool->lock);
+			pthread_exit(0);
+		}
+
 		if(!list_empty(&wthread->queues)) {
-//printf("here\n");
+
 			struct list_elem * e = list_pop_back(&wthread->queues);
 			worker = list_entry(e, struct future, elem);
 		}
 		else {
 
-			if(!list_empty(&pool->queues)) {
+			if(!list_empty(&pool->queues))  {
 //printf("111\n");
 				struct list_elem *e = list_pop_front(&pool->queues);
 				worker = list_entry(e, struct future, elem);
@@ -218,7 +226,6 @@ printf("22\n");
 
 		if (worker == NULL) {
 			printf("Error: no task\n");
-			pool->shutdown = true;
 			break;
 		}
 
@@ -226,14 +233,14 @@ printf("22\n");
 		pthread_mutex_unlock(&pool->lock);
 
 		worker->results = worker->task(pool, worker->data);
-			
-		pthread_mutex_lock(&pool->lock);
 
+		pthread_mutex_lock(&pool->lock);
 		worker->status = 2;
 
 		pthread_cond_signal(&worker->workdone);
 		pthread_mutex_unlock(&pool->lock);
 	}
+
 	return NULL;
 }
 
@@ -287,8 +294,6 @@ void * future_get(struct future * worker) {
 
 	if (worker->status == 0) {
 
-		list_remove(&worker->elem);
-
 		worker->status = 1;
 
 		pthread_mutex_unlock(&worker->pool->lock);
@@ -297,21 +302,23 @@ void * future_get(struct future * worker) {
 
 		pthread_mutex_lock(&worker->pool->lock);
 
+		list_remove(&worker->elem);
 		worker->status = 2;
+		pthread_mutex_unlock(&worker -> pool->lock);
+		return worker -> results;
 	}
 	else {
-
-		pthread_mutex_unlock(&worker->pool->lock);
-
-		if (worker->status != 2)
+		if (worker -> status == 2) {
+			pthread_mutex_unlock(&worker -> pool -> lock);
+			return worker -> results;		
+		}
+		if (worker->status != 2) {
+			printf(" worker -> status != 2\n");		
 			pthread_cond_wait(&worker->workdone, &worker->pool->lock);
-
-		pthread_mutex_lock(&worker->pool->lock);
+		}
+		pthread_mutex_unlock(&worker -> pool -> lock);	
 	}
-
-
 	void *result = worker->results;
-	pthread_mutex_unlock(&worker->pool->lock);
 
 	return result;
 }
@@ -324,21 +331,9 @@ void future_free(struct future * worker) {
 		exit(1);
 	} 
 	else {
-		// Think of the two cases; when "future_thread is not finished and when it finished"
-		// Destroy it semaphore and mutex;
-		// -> order whould be 1. semaphore and mutex
-		// This means I need to initialize semaphore and mutex in future struct
-		if (worker->status == 2) {
 
-			pthread_cond_destroy(&worker->workdone);
-			free(worker);
-		}
-		else {
-
-			pthread_cond_wait(&worker->workdone, &worker->pool->lock);
-			pthread_cond_destroy(&worker->workdone);
-			free(worker);
-		}
+		pthread_cond_destroy(&worker->workdone);
+		free(worker);
 	}
 }
 
