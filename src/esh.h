@@ -13,12 +13,14 @@
 #include <obstack.h>
 #include <stdlib.h>
 #include <termios.h>
+#include "esh-sys-utils.h"
 #include "list.h"
 
 /* Forward declarations. */
 struct esh_command;
 struct esh_pipeline;
 struct esh_command_line;
+struct list joblist;
 
 /*
  * A esh_shell object allows plugins to access services and information. 
@@ -204,5 +206,7 @@ void esh_plugin_initialize(struct esh_shell *shell);
 
 /* List of loaded plugins */
 extern struct list esh_plugin_list;
+
+pid_t shellPid;
 
 #endif //__ESH_H
