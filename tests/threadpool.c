@@ -79,6 +79,8 @@ struct thread_pool * thread_pool_new(int nthreads) {
 	pthread_cond_init(&pool->create_cond, NULL);
 	pthread_cond_init(&pool->added_cond, NULL);
 
+	pthread_mutex_lock(&pool->create_mutex);
+
 	list_init(&pool->queues);
 
 	pool->num_thread = nthreads;
@@ -87,8 +89,6 @@ struct thread_pool * thread_pool_new(int nthreads) {
 	pool->addeddone = false;
 
 	pool->threads = calloc(nthreads, sizeof(struct work_thread));
-
-	pthread_mutex_lock(&pool->create_mutex);
 
 	for (int i = 0; i < nthreads; i++) {
 		struct work_thread * current_thread = &pool->threads[i];
@@ -124,8 +124,8 @@ struct thread_pool * thread_pool_new(int nthreads) {
  * Returns a future representing this computation.
  */
 struct future * thread_pool_submit(struct thread_pool *pool, fork_join_task_t task, void * data) {
-
 	pthread_mutex_lock(&pool->lock);
+	//printf("Submit\n");
 	// allocate a new future in this function
 	struct future *return_future = malloc(sizeof(struct future));
 
@@ -137,7 +137,7 @@ struct future * thread_pool_submit(struct thread_pool *pool, fork_join_task_t ta
 	return_future->status = 0;
 	
 	if (is_worker) {
-printf("123");
+//printf("123");
 		list_push_front(&wthread->queues, &return_future->elem);
 }
 	else 
@@ -156,13 +156,11 @@ static void * working_thread(void * vv) {
 
 	struct work_thread * current_thread = (struct work_thread *) vv;
 	struct thread_pool * pool = current_thread->pool;
-
-	pthread_mutex_lock(&pool->create_mutex);
+		pthread_mutex_lock(&pool->create_mutex);
 	if (pool->createdone == false)
 		pthread_cond_wait(&pool->create_cond, &pool->create_mutex);
 
 	pthread_mutex_unlock(&pool->create_mutex);
-
 	for(;;) {
 
 		wthread = current_thread;
@@ -171,22 +169,19 @@ static void * working_thread(void * vv) {
 		struct future * worker;
 
 		pthread_mutex_lock(&pool->lock);
-
-		if (pool->addeddone == false)
-			pthread_cond_wait(&pool->added_cond, &pool->lock);
-
+//printf("hello\n");
 		while(stop(pool)) {
-printf("sleep\n");
+			//printf("trheadsn\n");
 			pthread_cond_wait(&pool->added_cond, &pool->lock);
-printf("sleep2\n");
+			//printf("thread2\n");
 		}
 
-		if(pool->shutdown) {
-printf("22\n");
-			pthread_mutex_unlock(&pool->lock);
-			pthread_exit(0);
-		}
-
+			if(pool->shutdown) {
+//printf("22\n");
+				pthread_mutex_unlock(&pool->lock);
+				pthread_exit(0);
+			}
+		
 		if(!list_empty(&wthread->queues)) {
 
 			struct list_elem * e = list_pop_back(&wthread->queues);
@@ -195,7 +190,6 @@ printf("22\n");
 		else {
 
 			if(!list_empty(&pool->queues))  {
-//printf("111\n");
 				struct list_elem *e = list_pop_front(&pool->queues);
 				worker = list_entry(e, struct future, elem);
 			}
@@ -203,7 +197,8 @@ printf("22\n");
 
 				int i;
 				struct work_thread *stealing_thread;
-				for(i = 0; i < pool->num_thread; i++) {
+				for(i = 0; i < pool->num_thread; i++) 
+				{
 
 					stealing_thread = &pool->threads[i];
 
@@ -224,21 +219,21 @@ printf("22\n");
 			}
 		}
 
-		if (worker == NULL) {
-			printf("Error: no task\n");
-			break;
+		if (worker != NULL) {
+			if (worker -> status == 0) {
+			worker->status = 1;
+			pthread_mutex_unlock(&pool->lock);
+
+			worker->results = worker->task(pool, worker->data);
+
+			pthread_mutex_lock(&pool->lock);
+			worker->status = 2;
+
+			pthread_cond_signal(&worker->workdone);
+			pthread_mutex_unlock(&pool->lock);
+			}
 		}
-
-		worker->status = 1;
-		pthread_mutex_unlock(&pool->lock);
-
-		worker->results = worker->task(pool, worker->data);
-
-		pthread_mutex_lock(&pool->lock);
-		worker->status = 2;
-
-		pthread_cond_signal(&worker->workdone);
-		pthread_mutex_unlock(&pool->lock);
+		pthread_mutex_unlock(&pool -> lock);
 	}
 
 	return NULL;
@@ -254,9 +249,9 @@ printf("22\n");
 void thread_pool_shutdown_and_destroy(struct thread_pool * pool) {
 
 	pthread_mutex_lock(&pool->lock);
-
+	 //printf("Destroy\n");
 	pool->shutdown = true;
-	pthread_cond_signal(&pool->added_cond);
+	pthread_cond_broadcast(&pool->added_cond);
 
 	pthread_mutex_unlock(&pool->lock);
 
@@ -304,23 +299,16 @@ void * future_get(struct future * worker) {
 
 		list_remove(&worker->elem);
 		worker->status = 2;
-		pthread_mutex_unlock(&worker -> pool->lock);
-		return worker -> results;
 	}
 	else {
-		if (worker -> status == 2) {
-			pthread_mutex_unlock(&worker -> pool -> lock);
-			return worker -> results;		
-		}
-		if (worker->status != 2) {
-			printf(" worker -> status != 2\n");		
-			pthread_cond_wait(&worker->workdone, &worker->pool->lock);
-		}
-		pthread_mutex_unlock(&worker -> pool -> lock);	
-	}
-	void *result = worker->results;
 
-	return result;
+		while (worker->status != 2)
+			pthread_cond_wait(&worker->workdone, &worker->pool->lock);
+	}
+
+	pthread_mutex_unlock(&worker -> pool -> lock);
+
+	return worker->results;
 }
 
 /* Deallocate this future.  Must be called after future_get() */
